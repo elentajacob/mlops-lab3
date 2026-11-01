@@ -102,7 +102,7 @@ def accuracy(y_true, y_pred):
 def precision(y_true, y_pred):
     """TP / (TP + FP). Returns 0.0 when nothing was predicted positive."""
     cm = confusion_matrix(y_true, y_pred)
-    predicted_positive = cm["tp"] + cm["fp"]
+    predicted_positive = cm["tp"] + cm["fn"]
     return cm["tp"] / predicted_positive if predicted_positive else 0.0
 
 
