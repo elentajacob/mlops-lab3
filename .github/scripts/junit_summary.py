@@ -43,6 +43,8 @@ def to_markdown(title, totals, failed):
 
 
 if __name__ == "__main__":
+    # Windows runners default to a legacy code page that can't print ✅/❌/—
+    sys.stdout.reconfigure(encoding="utf-8")
     if len(sys.argv) < 3:
         sys.exit("usage: junit_summary.py <title> <report.xml> [...]")
     totals, failed = summarize(sys.argv[2:])
