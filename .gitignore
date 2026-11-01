@@ -1,0 +1,12 @@
+# Virtual environments
+venv/
+lab_01/
+# Python / tool caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+# Test and coverage output
+.coverage
+coverage.xml
+reports/
