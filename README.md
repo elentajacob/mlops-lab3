@@ -1,178 +1,304 @@
-# LAB1 - MLOps (IE-7374) 
+# MLOps Lab 3 — Continuous Integration with GitHub Actions, pytest & unittest
 
-This lab focuses on 5 modules, which includes creating a virtual environment, creating a GitHub repository, creating Python files, creating test files using pytest and unittest, and implementing GitHub Actions.
+[![CI](https://github.com/elentajacob/mlops-lab3/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/elentajacob/mlops-lab3/actions/workflows/ci.yml)
 
+**Author:** Elenta Jacob · M.S. Data Science, Northeastern University (Khoury College)
 
+Every push and every pull request runs a CI pipeline that **lints** the code, runs the **pytest** and **unittest** suites on **3 Python versions × 2 operating systems**, enforces a **coverage gate**, and reports a single **"CI passed"** check. The `main` branch is protected: a change can only be merged if that check is green.
 
+Based on GitHub Lab 1 from the course repository. The CI pipeline was rebuilt, and the code and both test suites were replaced. All changes are listed below.
 
-## Step 1: Creating a Virtual Environment
+---
 
-In software development, it's crucial to manage project dependencies and isolate your project's environment from the global Python environment. This isolation ensures that your project remains consistent, stable, and free from conflicts with other Python packages or projects. To achieve this, we create a virtual environment dedicated to our project. <br>
-<br>
-To create a virtual environment, follow these steps:
+## Table of Contents
 
-1. Open a Command Prompt or Terminal in the directory where you want to create your project.
-2. Choose a name for your virtual environment (e.g "lab_01") and run the appropriate command:
-    ```
-    python -m venv lab_01
-    ```
-3. Activate the virtual environment
-    ```
-    lab01\Scripts\activate
-    ```
-After activation, you will see the virtual environment's name in your command prompt or terminal, indicating that you are working within the virtual environment.
+1. [What I Changed — CI Pipeline](#1-what-i-changed--ci-pipeline)
+2. [What I Changed — Code & Tests](#2-what-i-changed--code--tests)
+3. [How the Pipeline Works](#3-how-the-pipeline-works)
+4. [Branch Protection & the Pull Request Demo](#4-branch-protection--the-pull-request-demo)
+5. [Results](#5-results)
+6. [Run It on GitHub (no installation needed)](#6-run-it-on-github-no-installation-needed)
+7. [Run It on Your Own Computer](#7-run-it-on-your-own-computer)
+8. [What a Successful Run Looks Like](#8-what-a-successful-run-looks-like)
+9. [Design Decisions](#9-design-decisions)
+10. [Troubleshooting](#10-troubleshooting)
+11. [Screenshots](#11-screenshots)
 
+---
 
-## Step 2: Creating a GitHub Repository, Cloning and Folder Structure
-Now that we have set up our virtual environment, the next step is to create a GitHub repository for our project and establish a structured folder layout. This organization helps maintain your project's code, data, and tests in an organized manner.
+## 1. What I Changed — CI Pipeline
 
-### Fork the Repository: 
-Click the "Fork" button at the top right of this [repository](https://github.com/raminmohammadi/MLOps/) to create your own copy.
+This is the core of the lab. The original two workflows **no longer run at all**:
 
-### Creating a GitHub Repository
-- Open a web browser and go to GitHub.
-- In the upper right corner, click the "+" button and select "New repository."
-- Choose a name for your repository.
-- Choose the visibility of your repository—either public (visible to everyone) or private (accessible only to selected collaborators)
-- Check the "Initialize this repository with a README" box. This will create an initial README file that you can edit to provide project documentation.
-- Click the "Create repository" button.
+- `pytest_action.yml` has a typo (`run-nam:`) and uses both `branches` and `branches-ignore` on the same `push` trigger, which GitHub rejects as an invalid workflow.
+- Both workflows use `actions/upload-artifact@v2` and `setup-python@v2`. GitHub has shut down artifact actions v2/v3, so the upload step fails.
+- Both pin Python 3.8, which is end-of-life.
+- They live in a `workflows/` folder, which GitHub ignores; only `.github/workflows/` is executed.
 
-### Cloning the Repository
-- Open a Command Prompt or Terminal.
-- Navigate to the directory where you want to clone your GitHub repository. This should be the same directory where you created your virtual environment.
-- Run the following command to clone your GitHub repository into the current directory:
-    ```
-    git clone <repository_url>
-    ```
-- Replace <repository_url> with the URL of your GitHub repository. You can find this URL on your GitHub repository's main page.
-After running the command, the repository will be cloned, and you'll have a local copy of your GitHub project in your chosen directory.
+| | Original Lab | My Version |
+|---|---|---|
+| **Workflow files** | Two separate one-job workflows (`pytest_action.yml`, `unittest_action.yml`) | One staged pipeline, `.github/workflows/ci.yml` |
+| **Stages** | Single job each | **Lint → pytest + unittest in parallel → "CI passed" gate** (jobs linked with `needs:`) |
+| **Linting** | None | **ruff** runs first; test jobs only start if lint passes |
+| **Environments** | Python 3.8 on Ubuntu | **Matrix: Python 3.10, 3.11, 3.12 × Ubuntu and Windows**, 6 environments per suite (12 test jobs), `fail-fast: false` so every failure is reported |
+| **Coverage** | None | **pytest-cov with a coverage gate**: the build fails if coverage of `src/` drops below `COVERAGE_MIN` (95%) |
+| **Pull requests** | Not checked | Every PR into `main` runs the full pipeline |
+| **Merge protection** | None | A **ruleset on `main`** requires a pull request and a green **"CI passed"** check; failing PRs cannot be merged |
+| **Single required check** | n/a | `ci-passed` job aggregates all stages, so branch protection needs only one check name instead of 13 |
+| **Results** | Plain logs; `echo` success/failure messages | **Job summaries**: test count table (passed/failed/errors/time), coverage table, list of failing tests, and a final stage-by-stage CI result table |
+| **Artifacts** | `upload-artifact@v2` (now broken) | JUnit XML, coverage XML and unittest logs uploaded from **every** environment with `upload-artifact@v6`, even on failure |
+| **Triggers** | `push` (plus an invalid `label`/`issues` config) | `push` to `main` with **path filters** (only code/test/CI changes), every `pull_request`, and a manual **Run workflow** button |
+| **Efficiency** | None | **pip caching**, and **concurrency** cancels outdated runs on the same branch |
+| **Security** | Implicit permissions | Explicit read-only `permissions: contents: read` |
+| **Cross-platform** | Linux only | `shell: bash` on every OS for identical behaviour; job-summary script forces UTF-8 so ✅/❌ render on Windows |
+| **Action versions** | `checkout@v2`, `setup-python@v2`, `upload-artifact@v2` (Node 12/16, retired) | `checkout@v5`, `setup-python@v6`, `upload-artifact@v6` (Node 24) |
+| **Dependencies** | `pytest` unpinned | All tools **pinned** in `requirements.txt` |
 
-### Establishing Folder Structure
-- Once you have cloned yor repository, you can establish a structured folder layout within it. This layout helps organize your project into key directories for code, data, and tests. Create the following subfolders within your repository: <br>
-- data: This folder is used for storing project data files or datasets. <br>
-- src: This folder is where you'll store your project's source code files. <br>
-- test: This folder is dedicated to unit tests and test scripts for your code. <br>
-- Create a file named .gitignore. This is useful to exclude the virtual environment and other unnecessary files from version control.
-- Add the virtual environment folder name inside your gitignore file so that its not tracked by Git.
+## 2. What I Changed — Code & Tests
 
-### Adding and Pushing Your Project Code to GitHub
-Now that we have our virtual environment set up, the GitHub repository created, and the folder structure organized, let's add our project's code and push it to GitHub. 
+| | Original Lab | My Version |
+|---|---|---|
+| **Code under test** | `calculator.py`: 4 arithmetic functions (`fun4` has no input check, so `fun4("a","b","c")` returns `"abc"`) | `ml_metrics.py`: 10 ML statistics and classification metrics with full input validation |
+| **Functions** | add, subtract, multiply, add-three | `mean`, `variance` (population & sample), `std`, `z_scores`, `min_max_scale`, `confusion_matrix`, `accuracy`, `precision`, `recall`, `f1_score` |
+| **Error handling** | `ValueError` for non-numbers in 3 of 4 functions | Clear `TypeError`/`ValueError` for empty input, non-numeric values, booleans, mismatched label lengths, non-binary labels, invalid scaling ranges; documented zero-division behaviour (returns 0.0, like scikit-learn) |
+| **pytest suite** | 4 tests | **37 test cases** using `@pytest.mark.parametrize`, fixtures, `pytest.raises(match=...)`, `pytest.approx` |
+| **unittest suite** | 4 tests, `sys.path` hack | **14 tests** in 3 `TestCase` classes, using `subTest`, `setUp`, `assertRaises`, `assertAlmostEqual`; no path hacks (run with `-t .`) |
+| **Coverage** | Not measured | **100%** line coverage of `src/` |
+| **Repo hygiene** | No `.gitignore`; empty `data/` placeholder | `.gitignore` for venvs, caches and reports; unused `data/` removed |
 
-**Adding Your Project Code** <br>
-- Navigate to your project directory using the Command Prompt or Terminal, where you have the virtual environment and folder structure set up.
-- Create and write your Python code or other project files within the specified directories (src, data, etc.) according to your project requirements.
-- Once your project files are ready, it's time to add them to Git's staging area. In your project directory, run the following command:
-    ```
-    git add .
-    ```
-- This command stages all the changes and new files in your project directory for the next commit.
+---
 
-**Committing Your Changes** <br>
-- After staging your changes, commit them with a meaningful commit message that describes the changes you made. Replace <your_commit_message> with a descriptive message:
-    ```
-    git commit -m "<your_commit_message>"
-    ```
+## 3. How the Pipeline Works
 
-**Pushing to GitHub** <br>
-- To push your committed changes to your GitHub repository, use the following command:
-    ```
-    git push origin main
-    ```
-## Step 3: Creating calculator.py in src Folder
-- In this step, we create a Python script named calculator.py within the src folder of your project. This script contains a set of mathematical functions designed to perform basic arithmetic operations.
-- fun1(x, y) adds two input numbers, x and y.
-- fun2(x, y) subtracts y from x.
-- fun3(x, y) multiplies x and y.
-- fun4(x, y) combines the results of the above functions and returns their sum.
-- To view the code and gain a deeper understanding, please refer to the calculator.py file located under the src folder in this [link](https://github.com/raminmohammadi/MLOps/blob/main/src/lab1/calculator.py).
+```mermaid
+flowchart LR
+    A["push to main /<br/>pull request"] --> B["Lint (ruff)"]
+    B -->|pass| C["pytest × 6<br/>py3.10 · 3.11 · 3.12<br/>Ubuntu · Windows<br/>+ coverage gate ≥ 95%"]
+    B -->|pass| D["unittest × 6<br/>py3.10 · 3.11 · 3.12<br/>Ubuntu · Windows"]
+    B -->|fail| X["Tests skipped"]
+    C --> E{"CI passed?<br/>all stages = success"}
+    D --> E
+    X --> E
+    E -->|yes| F["✅ PR can be merged"]
+    E -->|no| G["❌ Merge blocked<br/>by branch ruleset"]
+```
 
-> **Note:** <br>
-Whenever you want to push files to your repository follow this step
-[Adding and Pushing Your Project Code to GitHub](#adding-and-pushing-your-project-code-to-github)
+### Repository structure
 
-## Step 4: Creating tests using Pytest and Unittests
-- In this step, we'll set up unit tests for the functions in our calculator.py script using two popular testing frameworks: [pytest](https://docs.pytest.org/en/7.4.x/) and [unittest](https://docs.python.org/3/library/unittest.html). Unit testing ensures that individual components of your code work as expected, helping you catch and fix bugs early in the development process.
+```
+mlops-lab3/
+├── .github/
+│   ├── workflows/ci.yml          # The CI pipeline (lint -> test matrix -> CI passed)
+│   └── scripts/junit_summary.py  # Turns JUnit XML into job-summary tables
+├── src/
+│   ├── __init__.py
+│   └── ml_metrics.py             # Code under test: statistics + classification metrics
+├── test/
+│   ├── __init__.py
+│   ├── test_pytest.py            # 37 pytest cases
+│   └── test_unittest.py          # 14 unittest tests
+├── screenshots/                  # Evidence of pipeline runs
+├── requirements.txt              # Pinned tool versions
+└── .gitignore
+```
 
-**Using Pytest** <br>
-- Installation (if not already installed):
-- If you haven't already installed pytest, you can do so using pip:
-    ```
-    pip install pytest
-    ```
-### Writing Pytest Tests
-- Pytest makes it easy to write tests for your Python code. Tests are written as regular Python functions, and test file names typically start with test_ or end with _test.py.
-- To run your Pytest tests, you can use the pytest command followed by the name of the test file or directory containing your tests:
-    ```
-    pytest test_sample.py
-    ```
-- Pytest automatically discovers test functions based on naming conventions. It searches for functions starting with test_ or ending with _test, and it can discover tests in subdirectories as well. This makes it easy to organize your tests.
-- Pytest supports parametrized tests, which allow you to run the same test function with multiple sets of inputs and expected outputs. This is particularly useful for testing functions with different input scenarios. Please refer the commented out code in the test_pytest.py file for your reference.
-- Let's create a test file named test_pytest.py within the test folder. This file will contain a series of test functions, each aimed at verifying the behavior of specific functions within calculator.py.
-- We've prepared four test functions (test_fun1, test_fun2, test_fun3, and test_fun4) to test the functions within calculator.py. Each test function uses the assert statement to validate the expected outcomes. Refer the file under test folder for your [reference](https://github.com/raminmohammadi/MLOps/blob/main/Github_Labs/Lab1/test/test_pytest.py).
-- By running these pytest tests, you can verify that your calculator functions are working correctly.
+---
 
-### Writing Tests with UnitTest
-- Unittest allows you to write tests as classes that inherit from the unittest.TestCase class. Test methods are identified by their names, which must start with "test_" to be recognized as test cases.
-- To run Unittest tests, you typically execute your test script, which should include a call to unittest.main() at the end. Here's how you can run the tests:
-    ```
-    python test_sample.py
-    ```
-- Unittest relies on test discovery, which means it will find test methods based on naming conventions, similar to Pytest. Test methods must start with "test_" to be recognized as test cases.
-- Unittest provides a variety of assertion methods, such as assertEqual, assertTrue, assertFalse, and others, to check conditions in your tests. You can choose the assertion method that best suits your testing needs.
-- Let's create a test file named test_unittest.py within the test folder. This file will contain a series of test functions, each aimed at verifying the behavior of specific functions within calculator.py.
-- We've prepared four test functions (test_fun1, test_fun2, test_fun3, and test_fun4) to test the functions within calculator.py. Each test function uses the self.assertEqual statement to validate the expected outcomes. Refer the file under test folder for your [reference](https://github.com/raminmohammadi/MLOps/blob/main/Github_Labs/Lab1/test/test_unittest.py).
-- By running these unittest tests, you can verify that your calculator functions are working correctly.
+## 4. Branch Protection & the Pull Request Demo
 
-## Step 5. Implementing GitHub Actions
-- GitHub Actions is a powerful automation and CI/CD (Continuous Integration/Continuous Deployment) platform provided by GitHub. It enables you to automate various workflows and tasks directly within your GitHub repository. GitHub Actions can be used for a wide range of purposes, such as running tests, deploying applications, and automating release processes.
+`main` is protected by a repository **ruleset** (Settings → Rules → Rulesets → `protect-main`):
 
-**How GitHub Actions Work:** <br>
+| Rule | Effect |
+|---|---|
+| Require a pull request before merging (0 approvals) | No direct pushes to `main`; every change goes through a PR |
+| Require status checks to pass: **CI passed** | A PR can only be merged when the whole pipeline is green |
+| Block force pushes, Restrict deletions | `main`'s history can't be rewritten or deleted |
+| Bypass list: empty | The rules apply to the repository owner too |
 
-- GitHub Actions work based on events, actions, and triggers:
-- **Events:** These are specific activities that occur within your GitHub repository, such as code pushes, pull requests, or issue comments. GitHub Actions can respond to these events.
-- **Actions:** Actions are individual tasks or steps that you define in a workflow file. These tasks can be anything from building your code to running tests or deploying your application.
-- **Triggers:** Triggers are conditions that cause a workflow to run. They can be based on events (e.g., a new pull request) or scheduled to run at specific times.
+**Demo (PR #1, closed without merging):** I opened a pull request titled *"Refactor precision denominator"* that changed one line in `precision()`, dividing by `TP + FN` instead of `TP + FP` (a realistic precision/recall mix-up).
 
-**The Purpose of GitHub Actions:** <br>
+- **Lint passed:** the code was syntactically fine.
+- **All 12 test jobs failed** on every Python version and OS. pytest pinpointed the bug: `test_metrics_on_known_example` expected precision **0.8** but got **0.667** (the recall value).
+- **CI passed failed**, so GitHub **blocked the merge**. The PR was closed and the bug never reached `main`.
 
-- GitHub Actions serves several purposes:
-- **Automation:** It automates repetitive tasks, reducing manual effort and ensuring consistency in your development process.
-- **Continuous Integration (CI):** It allows you to set up CI pipelines to automatically build, test, and validate your code changes whenever new code is pushed to the repository.
-- **Continuous Deployment (CD):** It enables automatic deployment of your application when changes are merged into a specific branch, ensuring a smooth and reliable release process.
+**Lesson from the demo:** coverage stayed at **100%** while the code was wrong. Coverage only shows code was *executed*; it takes assertions against known correct values to catch wrong *results*. The pipeline enforces both.
 
-### Using Pytest and Unittest with GitHub Actions:
-- Integrating Pytest and Unittest with GitHub Actions can significantly improve the quality and reliability of your codebase. Here's how:
-- Pytest with GitHub Actions: You can create a GitHub Actions workflow (e.g., pytest_action.yml) that specifies the steps for running your Pytest tests. When events like code pushes or pull requests occur, GitHub Actions will automatically trigger the workflow, running your Pytest tests and reporting the results back to you. This helps you catch bugs and ensure that your code meets quality standards early in the development process.
-- Unittest with GitHub Actions: Similarly, you can create a separate GitHub Actions workflow (e.g., unittest_action.yml) to run your Unittest tests. This ensures that both your Pytest and Unittest suites are executed automatically whenever code changes are made or pull requests are submitted. It provides a robust validation mechanism for your codebase.
-- When collaborating in teams, the automated testing process ensures that all test cases pass successfully before allowing the merge of a pull request into the main branch.
+---
 
-### Creating GitHub Actions Workflow Files:
-- To implement Pytest and Unittest with GitHub Actions, you'll create two workflow files under the .github/workflows directory in your repository: pytest_action.yml and unittest_action.yml. These workflow files define the specific actions and triggers for running your tests.
+## 5. Results
 
-**pytest_action.yml** <br>
-Please refer [this](https://github.com/raminmohammadi/MLOps/blob/main/Github_Labs/Lab1/workflows/pytest_action.yml) file for your reference
-1. Workflow Name: The workflow is named "Testing with Pytest."
-2. Event Trigger: It specifies the event that triggers the workflow. In this case, it triggers when code is pushed to the main branch.
-3. Jobs: The workflow contains a single job named "build," which runs on the ubuntu-latest virtual machine environment.
-4. Steps:
-- Checkout code: This step checks out the code from the repository using actions/checkout@v2.
-- Set up Python: It sets up the Python environment using actions/setup-python@v2 and specifies Python version 3.8.
-- Install Dependencies: This step installs the project dependencies by running pip install -r requirements.txt.
-- Run Tests and Generate XML Report: The core testing step runs Pytest with the --junitxml flag to generate an XML report named pytest-report.xml. The continue-on-error: false setting ensures that the workflow will be marked as failed if any test fails.
-- Upload Test Results: In this step, the generated XML report is uploaded as an artifact using actions/upload-artifact@v2. The name of the artifact is "test-results," and the path to the report is specified as pytest-report.xml.
-- Notify on Success and Failure: These two steps use conditional logic to notify based on the outcome of the tests.
-- if: success() checks if the tests passed successfully and runs the "Tests passed successfully" message.
-- if: failure() checks if the tests failed and runs the "Tests failed" message.
+| Check | Result on `main` |
+|---|---|
+| Lint (ruff) | ✅ No issues |
+| pytest | ✅ **37 / 37 passed** on all 6 environments |
+| unittest | ✅ **14 / 14 passed** on all 6 environments |
+| Coverage of `src/` | ✅ **100%** (gate: 95%) |
+| CI passed | ✅ All stages succeeded |
+| Total pipeline time | About 1.5 minutes (14 jobs, test jobs run in parallel) |
 
-**unittest_action.yml** <br>
- Please refer [this](https://github.com/raminmohammadi/MLOps/blob/main/Github_Labs/Lab1/workflows/unittest_action.yml) file for your reference
-1. Workflow Name: This GitHub Actions workflow is named "Python Unittests."
-2. Event Trigger: The workflow is triggered by the "push" event, specifically when changes are pushed to the main branch.
-3. Jobs: The workflow defines a single job named "build" that runs on the ubuntu-latest virtual machine environment.
-4. Steps:
-- Checkout code: This step uses the actions/checkout@v2 action to check out the code from the repository. It ensures that the workflow has access to the latest code.
-- Set up Python: The "Set up Python" step uses the actions/setup-python@v2 action to configure the Python environment. It specifies that Python version 3.8 should be used.
-- Install Dependencies: This step runs the command pip install -r requirements.txt to install the project's Python dependencies. It assumes that the project's dependencies are listed in the requirements.txt file.
-- Run unittests: In this step, the unittest tests are executed using the command python -m unittest test.test_unittest. It runs the unittest test suite defined in the test.test_unittest module.
-- Notify on success: This step uses conditional logic with if: success() to check if all the unittest tests passed successfully. If they did, it runs the message "Unit tests passed successfully."
-- Notify on failure: Similarly, this step uses conditional logic with if: failure() to check if any of the unittest tests failed. If any test failed, it runs the message "Unit tests failed."
+---
+
+## 6. Run It on GitHub (no installation needed)
+
+You only need a free GitHub account and a web browser.
+
+1. **Fork** this repository (Fork button, top-right).
+2. Go to the **Actions** tab and click **I understand my workflows, go ahead and enable them**.
+3. Click **CI → Run workflow → Run workflow**. (Pushing a change to `src/`, `test/`, `requirements.txt` or `.github/` also starts it.)
+4. Wait about 1.5 minutes. Open the run to see the job graph, and scroll down for the summary tables.
+5. **Optional, to reproduce the branch protection:** Settings → Rules → Rulesets → New branch ruleset → target the default branch → tick *Require a pull request before merging* and *Require status checks to pass* → add the check **CI passed** → Create. Then open a PR that breaks a test and watch the merge get blocked.
+
+No secrets or cloud accounts are needed.
+
+---
+
+## 7. Run It on Your Own Computer
+
+### 7.1 Install the prerequisites
+
+| Tool | Version | Where to get it |
+|---|---|---|
+| **Python** | **3.10, 3.11 or 3.12** (the versions CI tests) | https://www.python.org/downloads/ — on Windows, tick **"Add python.exe to PATH"** during installation |
+| **Git** | Any recent version (tested with 2.52) | https://git-scm.com/downloads |
+
+Check both are installed by opening a terminal (Windows: **Command Prompt**; macOS: **Terminal**):
+
+```bash
+python --version      # should print Python 3.10.x, 3.11.x or 3.12.x   (macOS: python3 --version)
+git --version
+```
+
+### 7.2 Get the code
+
+```bash
+git clone https://github.com/elentajacob/mlops-lab3.git
+cd mlops-lab3
+```
+
+### 7.3 Create a virtual environment and install dependencies
+
+**Windows (Command Prompt):**
+```bat
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**macOS / Linux:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Your prompt now starts with `(venv)`. Pinned versions:
+
+| Package | Version | Used for |
+|---|---|---|
+| pytest | 8.3.3 | Running the pytest suite |
+| pytest-cov | 5.0.0 | Measuring coverage during pytest |
+| coverage | 7.6.1 | Coverage engine and Markdown coverage report |
+| ruff | 0.6.9 | Linting |
+
+(`unittest` is part of Python's standard library, so nothing extra is needed.)
+
+### 7.4 Run each CI stage locally
+
+Run these from the repository root, the folder containing `requirements.txt`:
+
+**Lint:**
+```bash
+ruff check .
+```
+
+**pytest with the coverage gate:**
+```bash
+python -m pytest test/test_pytest.py -v --cov=src --cov-report=term-missing --cov-fail-under=95
+```
+
+**unittest:**
+```bash
+python -m unittest discover -s test -p "test_unittest.py" -t . -v
+```
+
+**Optional:** reproduce the demo by changing `cm["fp"]` to `cm["fn"]` inside `precision()` in `src/ml_metrics.py`, re-running the two test commands, and watching them fail. Undo the change afterwards.
+
+---
+
+## 8. What a Successful Run Looks Like
+
+### On GitHub
+
+- The **CI** run has a green ✅ and its job graph shows **Lint → Matrix: pytest (6 jobs) + Matrix: unittest (6 jobs) → CI passed**, all green.
+- Each pytest job summary shows a table with **37 tests, 37 passed, 0 failed** and a coverage table at **100%**.
+- Each unittest job summary shows **"Ran 14 tests … OK"**.
+- The **CI passed** summary ends with **"✅ All stages passed — safe to merge."**
+- On a pull request, the checks box at the bottom shows all checks green and the **Merge pull request** button is enabled.
+
+A **failing** change looks like this instead: test jobs turn red, the summary lists the failing tests by name, **CI passed** turns red, and the PR shows the merge as blocked.
+
+### On your computer
+
+`ruff check .` prints:
+```
+All checks passed!
+```
+
+The pytest command ends with:
+```
+Required test coverage of 95% reached. Total coverage: 100.00%
+============================== 37 passed in ...s ==============================
+```
+
+The unittest command ends with:
+```
+Ran 14 tests in ...s
+
+OK
+```
+
+---
+
+## 9. Design Decisions
+
+- **One pipeline instead of two workflows.** Stages with `needs:` give a clear order (don't run 12 test jobs if lint fails) and a single job graph showing the whole story.
+- **Both pytest and unittest.** The lab's goal is to compare the two frameworks, so both run on the same matrix: pytest for parametrization, fixtures and coverage; unittest for standard-library-only testing.
+- **Matrix of Python versions and operating systems.** Code that passes on one machine can fail on another. Testing 3.10–3.12 on Linux and Windows catches version- and platform-specific problems; it caught a real one here, where the summary script crashed on Windows' default text encoding until it was forced to UTF-8.
+- **An aggregating "CI passed" job.** Branch protection needs exact check names. One aggregate check means the ruleset doesn't have to list 13 names, and it keeps working if the matrix changes.
+- **No path filter on pull requests.** If a required check never runs, GitHub waits forever and the PR can't be merged. PRs therefore always run the full pipeline; path filters only apply to direct pushes.
+- **A pure-Python module under test.** `ml_metrics.py` has no dependencies, so CI failures always point to the code or tests, never to a package install problem.
+- **Coverage gate at 95%, not 100%.** It catches meaningful drops in testing without failing on a single harmless line.
+
+## 10. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `python` is not recognized (Windows) | Reinstall Python and tick **"Add python.exe to PATH"**, then reopen Command Prompt |
+| `ModuleNotFoundError: No module named 'src'` | Run the commands from the repository root, using `python -m pytest` / `python -m unittest ... -t .` exactly as shown |
+| `ruff` or `pytest` not found | Activate the virtual environment first (`venv\Scripts\activate` or `source venv/bin/activate`) |
+| Coverage gate fails locally | Make sure you ran the full `test/test_pytest.py` suite, not a single test |
+| Actions tab shows no runs on a fork | Click **I understand my workflows, go ahead and enable them**, then use **Run workflow** |
+| Can't push to `main` (rule violation) | Expected with branch protection: push to a new branch and open a pull request |
+| "CI passed" isn't offered when creating the ruleset | The check must have run at least once; run the workflow first, then add it |
+
+---
+
+## 11. Screenshots
+
+### CI pipeline passing on `main`: lint → 12 test jobs → CI passed
+![CI pipeline passed](screenshots/01_ci_pipeline_passed.png)
+
+### Job summaries: test results and coverage (Windows runner)
+![Test and coverage summary](screenshots/02_test_and_coverage_summary.png)
+
+### Branch ruleset on `main`: pull request + "CI passed" required
+![Branch protection rules](screenshots/03_branch_protection_rules.png)
+
+### Demo PR: all test jobs fail, "CI passed" is required, merge button disabled
+![PR merge blocked](screenshots/04_pr_merge_blocked.png)
+
+### Demo PR: the same pipeline, red this time
+![CI failed on PR](screenshots/05_ci_pipeline_failed_on_pr.png)
+
+### Demo PR: pytest pinpoints the bug (precision 0.667 instead of 0.8)
+![Failing test log](screenshots/06_failing_test_log.png)
