@@ -50,7 +50,7 @@ This is the core of the lab. The original two workflows **no longer run at all**
 | **Triggers** | `push` (plus an invalid `label`/`issues` config) | `push` to `main` with **path filters** (only code/test/CI changes), every `pull_request`, and a manual **Run workflow** button |
 | **Efficiency** | None | **pip caching**, and **concurrency** cancels outdated runs on the same branch |
 | **Security** | Implicit permissions | Explicit read-only `permissions: contents: read` |
-| **Cross-platform** | Linux only | `shell: bash` on every OS for identical behaviour; job-summary script forces UTF-8 so ✅/❌ render on Windows |
+| **Cross-platform** | Linux only | `shell: bash` on every OS for identical behaviour; job-summary script forces UTF-8 so status symbols render on Windows |
 | **Action versions** | `checkout@v2`, `setup-python@v2`, `upload-artifact@v2` (Node 12/16, retired) | `checkout@v5`, `setup-python@v6`, `upload-artifact@v6` (Node 24) |
 | **Dependencies** | `pytest` unpinned | All tools **pinned** in `requirements.txt` |
 
@@ -79,8 +79,8 @@ flowchart LR
     C --> E{"CI passed?<br/>all stages = success"}
     D --> E
     X --> E
-    E -->|yes| F["✅ PR can be merged"]
-    E -->|no| G["❌ Merge blocked<br/>by branch ruleset"]
+    E -->|yes| F["PR can be merged"]
+    E -->|no| G["Merge blocked<br/>by branch ruleset"]
 ```
 
 ### Repository structure
@@ -129,11 +129,11 @@ mlops-lab3/
 
 | Check | Result on `main` |
 |---|---|
-| Lint (ruff) | ✅ No issues |
-| pytest | ✅ **37 / 37 passed** on all 6 environments |
-| unittest | ✅ **14 / 14 passed** on all 6 environments |
-| Coverage of `src/` | ✅ **100%** (gate: 95%) |
-| CI passed | ✅ All stages succeeded |
+| Lint (ruff) | Passed, no issues |
+| pytest | **37 / 37 passed** on all 6 environments |
+| unittest | **14 / 14 passed** on all 6 environments |
+| Coverage of `src/` | **100%** (gate: 95%) |
+| CI passed | All stages succeeded |
 | Total pipeline time | About 1.5 minutes (14 jobs, test jobs run in parallel) |
 
 ---
@@ -229,10 +229,10 @@ python -m unittest discover -s test -p "test_unittest.py" -t . -v
 
 ### On GitHub
 
-- The **CI** run has a green ✅ and its job graph shows **Lint → Matrix: pytest (6 jobs) + Matrix: unittest (6 jobs) → CI passed**, all green.
+- The **CI** run is marked green, and its job graph shows **Lint → Matrix: pytest (6 jobs) + Matrix: unittest (6 jobs) → CI passed**, all green.
 - Each pytest job summary shows a table with **37 tests, 37 passed, 0 failed** and a coverage table at **100%**.
 - Each unittest job summary shows **"Ran 14 tests … OK"**.
-- The **CI passed** summary ends with **"✅ All stages passed — safe to merge."**
+- The **CI passed** summary ends with **"All stages passed — safe to merge."**
 - On a pull request, the checks box at the bottom shows all checks green and the **Merge pull request** button is enabled.
 
 A **failing** change looks like this instead: test jobs turn red, the summary lists the failing tests by name, **CI passed** turns red, and the PR shows the merge as blocked.
